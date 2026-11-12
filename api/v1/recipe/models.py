@@ -1,0 +1,74 @@
+#!/usr/bin/env python
+# encoding: utf-8
+
+from django.contrib.auth.models import User
+from django.db import models
+from django.utils.translation import ugettext_lazy as _
+from django_extensions.db.fields import AutoSlugField
+from imagekit.models import ImageSpecField
+from imagekit.processors import ResizeToFill
+
+from v1.recipe_groups.models import Cuisine, Course, Tag
+
+
+class Recipe(models.Model):
+    """
+    Django Model to hold Recipes.
+
+    Courses have a one to Many relation with Recipes.
+    Cuisines have a one to Many relation with Recipes.
+    Tags have a Many to Many relation with Recipes.
+    Ingredient Groups have a Many to one relation with Recipes.
+    Subrecipes have a Many to Many relation with Recipes. 
+        They allow another recipe to be show in the Ingredient section.
+
+    :title: = Title of the Recipe
+    :author: = Creator of the Recipe
+    :photo: = Raw Image of a Recipe
+    :photo_thumbnail: = compressed image of the photo
+    :info: = Description of the recipe
+    :directions: = How to make the recipe
+    :prep_time: = How long it takes to prepare the recipe
+    :cook_time: = How long the recipe takes to cook
+    :servings: = How many people the recipe with serve
+    :pub_date: = When the recipe was created
+    :update_date: = When the recipe was updated
+    """
+    title = models.CharField(_("Recipe Title"), max_length=250)
+    slug = AutoSlugField(_('slug'), populate_from='title', unique=True)
+    author = models.ForeignKey(User, on_delete=models.CASCADE, null=True)
+    photo = models.ImageField(_('photo'), blank=True, upload_to="upload/recipe_photos")
+    photo_thumbnail = ImageSpecField(source='photo',
+                                     processors=[ResizeToFill(300, 200)],
+                                     format='JPEG',
+                                     options={'quality': 70})
+    cuisine = models.ForeignKey(Cuisine, on_delete=models.CASCADE)
+    course = models.ForeignKey(Course, on_delete=models.CASCADE)
+    tags = models.ManyToManyField(Tag, verbose_name=_('tag'), blank=True)
+    subrecipes = models.ManyToManyField('self', verbose_name=_('subrecipes'), through='SubRecipe', symmetrical=False)
+    info = models.TextField(_('info'), help_text="enter information about the recipe", blank=True)
+    directions = models.TextField(_('direction_text'), help_text="directions", blank=True)
+    source = models.CharField(_('course'), max_length=200, blank=True)
+    prep_time = models.IntegerField(_('prep time'), help_text="enter time in minutes")
+    cook_time = models.IntegerField(_('cook time'), help_text="enter time in minutes")
+    servings = models.IntegerField(_('servings'), help_text="enter total number of servings")
+    pub_date = models.DateTimeField(auto_now_add=True)
+    update_date = models.DateTimeField(auto_now=True)
+    public = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['-pub_date', 'title']
+
+    def __str__(self):
+        return '%s' % self.title
+
+
+class SubRecipe(models.Model):
+    numerator = models.FloatField(_('numerator'), default=0)
+    denominator = models.FloatField(_('denominator'), default=1)
+    measurement = models.TextField(_('measurement'), blank=True, null=True)
+    child_recipe = models.ForeignKey("Recipe", on_delete=models.CASCADE, related_name='child_recipe', null=True)
+    parent_recipe = models.ForeignKey("Recipe", on_delete=models.CASCADE, related_name='parent_recipe', null=True)
+
+    def __str__(self):
+        return '%s' % self.parent_recipe.title
