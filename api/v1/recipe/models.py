@@ -42,15 +42,18 @@ class Recipe(models.Model):
                                      processors=[ResizeToFill(300, 200)],
                                      format='JPEG',
                                      options={'quality': 70})
-    cuisine = models.ForeignKey(Cuisine, on_delete=models.CASCADE)
-    course = models.ForeignKey(Course, on_delete=models.CASCADE)
+    # Optional, and on the way out: titles are mirrored into Tags and these
+    # two fields will be dropped once the front end stops reading them.
+    cuisine = models.ForeignKey(Cuisine, on_delete=models.SET_NULL, null=True, blank=True)
+    course = models.ForeignKey(Course, on_delete=models.SET_NULL, null=True, blank=True)
     tags = models.ManyToManyField(Tag, verbose_name=_('tag'), blank=True)
     subrecipes = models.ManyToManyField('self', verbose_name=_('subrecipes'), through='SubRecipe', symmetrical=False)
     info = models.TextField(_('info'), help_text="enter information about the recipe", blank=True)
     directions = models.TextField(_('direction_text'), help_text="directions", blank=True)
+    notes = models.TextField(_('notes'), help_text="shared notes, tweaks and verdicts", blank=True)
     source = models.CharField(_('course'), max_length=200, blank=True)
-    prep_time = models.IntegerField(_('prep time'), help_text="enter time in minutes")
-    cook_time = models.IntegerField(_('cook time'), help_text="enter time in minutes")
+    prep_time = models.IntegerField(_('prep time'), help_text="enter time in minutes", null=True, blank=True)
+    cook_time = models.IntegerField(_('cook time'), help_text="enter time in minutes", null=True, blank=True)
     servings = models.IntegerField(_('servings'), help_text="enter total number of servings")
     pub_date = models.DateTimeField(auto_now_add=True)
     update_date = models.DateTimeField(auto_now=True)

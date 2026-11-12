@@ -20,7 +20,9 @@ class Validators(object):
         return None
 
     def is_digit(self, item):
-        if self.partial and item is None:
+        # None is allowed outright: prep_time and cook_time are optional now,
+        # so a missing value must not fail on int(None).
+        if item is None:
             return None
         try:
             int(item)
@@ -157,12 +159,12 @@ class SaveRecipe(Validators):
             "directions": [self.required],
 
             "servings": [self.required, self.is_digit],
-            "prep_time": [self.required, self.is_digit],
-            "cook_time": [self.required, self.is_digit],
+
+            # Optional: a pasted recipe should save without them.
+            "prep_time": [self.is_digit],
+            "cook_time": [self.is_digit],
 
             "ingredient_groups": [self.required],
-            "cuisine": [self.required],
-            "course": [self.required],
         }
 
         errors = {}

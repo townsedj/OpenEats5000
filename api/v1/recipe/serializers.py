@@ -92,8 +92,8 @@ class RecipeSerializer(FieldLimiter, serializers.ModelSerializer):
     pub_date = serializers.DateTimeField(format="%Y-%m-%d", read_only=True)
     update_date = serializers.DateTimeField(format="%Y-%m-%d", read_only=True)
     username = serializers.ReadOnlyField(source='author.username')
-    course = CourseSerializer()
-    cuisine = CuisineSerializer()
+    course = CourseSerializer(required=False, allow_null=True)
+    cuisine = CuisineSerializer(required=False, allow_null=True)
 
     def get_subrecipes(self, obj):
         try:
