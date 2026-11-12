@@ -33,3 +33,8 @@ docker-compose.override.yml
 
 # Generated on first run, never committed
 .secret_key
+
+# USDA FoodData Central exports. Re-downloadable from
+# fdc.nal.usda.gov/download-datasets and ~90MB unzipped, so the database
+# that gets built from them is the artefact worth keeping, not these.
+data/
