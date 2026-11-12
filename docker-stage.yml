@@ -1,6 +1,6 @@
 services:
   api:
-    build: openeats-api/
+    build: api/
     command: /startup/prod-entrypoint.sh
     restart: on-failure
     volumes:
@@ -12,7 +12,7 @@ services:
     env_file:
       env_stg.list
   web:
-    build: openeats-web/
+    build: web/
     command: yarn start
     volumes:
       - public-ui:/code/build

@@ -1,23 +1,31 @@
 # Folders
-openeats-api/
-openeats-web/
-openeats-nginx/
-openeats-mobile/
-openeats-demo/
-open-eats.github.io/
 site-media/
 static-files/
 node_modules/
 secrets/*
 .idea/
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Local database (SQLite)
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
 
 # Files
 *.DS_Store
-*.pyc
 *.css.map
 *.js.map
 *.log
-*.pyc
+.env
 env_prod.list
 docker-prod.version.yml
 docker-prod.override.yml
