@@ -94,6 +94,10 @@ class RecipeSerializer(FieldLimiter, serializers.ModelSerializer):
     username = serializers.ReadOnlyField(source='author.username')
     course = CourseSerializer(required=False, allow_null=True)
     cuisine = CuisineSerializer(required=False, allow_null=True)
+    # Read-only: writes go through SaveRecipe, which sets the household
+    # from the request user. Meta.fields is '__all__', so without this the
+    # field would be writable and a caller could name any household id.
+    household = serializers.PrimaryKeyRelatedField(read_only=True)
 
     def get_subrecipes(self, obj):
         try:

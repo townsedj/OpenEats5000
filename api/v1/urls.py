@@ -6,6 +6,7 @@ from django.urls import include, path
 app_name='v1'
 urlpatterns = [
     path('accounts/', include('v1.accounts.urls')),
+    path('household/', include('v1.household.urls')),
     path('recipe_groups/', include('v1.recipe_groups.urls')),
     path('ingredient/', include('v1.ingredient.urls')),
     path('list/', include('v1.list.urls')),

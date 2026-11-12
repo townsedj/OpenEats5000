@@ -2,8 +2,10 @@
 # encoding: utf-8
 
 from django.test import TestCase
+from django.contrib.auth.models import User
 from rest_framework.test import APIRequestFactory
 from v1.recipe import views
+from v1.common.testing import one_household
 
 
 class RecipeSerializerTests(TestCase):
@@ -17,11 +19,16 @@ class RecipeSerializerTests(TestCase):
 
     def setUp(self):
         self.factory = APIRequestFactory()
+        self.user = User.objects.get(pk=1)
+        # Fixtures predate household scoping, so the rows they load have
+        # no household and a scoped queryset cannot see them.
+        self.household = one_household()
 
     def test_view_limiter(self):
         """Test to make sure we have the right fields"""
         view = views.RecipeViewSet.as_view({'get': 'list'})
         request = self.factory.get('/api/v1/recipe/recipes/tasty-chili?fields=id')
+        request.user = self.user
         response = view(request)
 
         self.assertTrue(response.data.get('id', True))
@@ -29,6 +36,7 @@ class RecipeSerializerTests(TestCase):
 
         view = views.RecipeViewSet.as_view({'get': 'list'})
         request = self.factory.get('/api/v1/recipe/recipes/tasty-chili?fields=id,title,photo')
+        request.user = self.user
         response = view(request)
 
         self.assertTrue(response.data.get('id', True))

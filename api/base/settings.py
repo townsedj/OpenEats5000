@@ -126,6 +126,8 @@ INSTALLED_APPS = (
     'rest_framework.authtoken',
 
     'base',
+    'v1.household',
+    'v1.nutrition',
     'v1.recipe',
     'v1.recipe_groups',
     'v1.ingredient',

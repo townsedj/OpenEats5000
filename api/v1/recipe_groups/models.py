@@ -63,4 +63,7 @@ class Tag(models.Model):
         return '%s' % self.title
 
     def recipe_count(self):
-        return self.recipe_set.filter(shared=0).count()
+        # Was filter(shared=0) -- Recipe has never had a `shared` field, so
+        # any call raised FieldError. Nothing called it, which is why it
+        # survived.
+        return self.recipe_set.count()

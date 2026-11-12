@@ -2,14 +2,47 @@
 # encoding: utf-8
 
 from rest_framework import serializers
+
+from v1.household.models import Household
+from v1.household.serializers import CurrentHouseholdDefault
 from .models import GroceryList, GroceryItem
 
 
-class GroceryItemSerializer(serializers.ModelSerializer):
+class HouseholdScopedItem:
+    """
+    Refuses to attach an item to a list or a planned meal outside the
+    caller's household.
+
+    Object permissions only run against rows that already exist, so without
+    this a member could POST an item carrying another household's list id.
+    """
+
+    def _check_household(self, value, field):
+        if value is None:
+            return value
+        household = Household.objects.for_user(self.context['request'].user)
+        owner_id = getattr(value, 'household_id', None)
+        if owner_id != household.id:
+            # Same message either way: do not reveal whether the row exists.
+            raise serializers.ValidationError('No such %s.' % field)
+        return value
+
+    def validate_list(self, value):
+        return self._check_household(value, 'list')
+
+    def validate_menu_item(self, value):
+        return self._check_household(value, 'menu item')
+
+
+class GroceryItemSerializer(HouseholdScopedItem, serializers.ModelSerializer):
     """Generic Serializer for grocery items"""
     class Meta:
         model = GroceryItem
-        fields = ('id', 'list', 'title', 'completed', 'order')
+        fields = (
+            'id', 'list', 'title', 'completed', 'order',
+            'menu_item', 'aisle', 'updated_at',
+        )
+        read_only_fields = ('updated_at',)
 
 
 class GroceryListSerializer(serializers.ModelSerializer):
@@ -19,10 +52,15 @@ class GroceryListSerializer(serializers.ModelSerializer):
     of the user that owns the list.
     """
     author = serializers.ReadOnlyField(source='author.username')
+    # Never taken from the request body: a client cannot file a list under
+    # somebody else's house.
+    household = serializers.HiddenField(default=CurrentHouseholdDefault())
 
     class Meta:
         model = GroceryList
-        fields = ('id', 'title', 'slug', 'pub_date', 'author', 'item_count')
+        fields = (
+            'id', 'title', 'slug', 'pub_date', 'author', 'household', 'item_count',
+        )
 
     def create(self, validated_data):
         # Create the Grocery List.
@@ -63,13 +101,17 @@ class BulkGroceryItemListSerializer(serializers.ListSerializer):
         return updated
 
 
-class BulkGroceryItemSerializer(serializers.ModelSerializer):
+class BulkGroceryItemSerializer(HouseholdScopedItem, serializers.ModelSerializer):
     """ Used to perform bulk operations on the GroceryItem model. """
 
     class Meta:
         model = GroceryItem
         list_serializer_class = BulkGroceryItemListSerializer
-        fields = ('id', 'list', 'title', 'completed', 'order')
+        fields = (
+            'id', 'list', 'title', 'completed', 'order',
+            'menu_item', 'aisle', 'updated_at',
+        )
+        read_only_fields = ('updated_at',)
 
     def to_internal_value(self, data):
         ret = super().to_internal_value(data)

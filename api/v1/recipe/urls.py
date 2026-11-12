@@ -7,7 +7,7 @@ from . import views
 
 # Create a router and register our viewsets with it.
 router = DefaultRouter()
-router.register(r'mini-browse', views.MiniBrowseViewSet)
+router.register(r'mini-browse', views.MiniBrowseViewSet, basename='mini-browse')
 router.register(r'recipes', views.RecipeViewSet, basename='recipes')
 
 urlpatterns = [

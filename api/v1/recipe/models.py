@@ -8,6 +8,7 @@ from django_extensions.db.fields import AutoSlugField
 from imagekit.models import ImageSpecField
 from imagekit.processors import ResizeToFill
 
+from v1.household.models import Household
 from v1.recipe_groups.models import Cuisine, Course, Tag
 
 
@@ -24,6 +25,7 @@ class Recipe(models.Model):
 
     :title: = Title of the Recipe
     :author: = Creator of the Recipe
+    :household: = The house that shares the Recipe
     :photo: = Raw Image of a Recipe
     :photo_thumbnail: = compressed image of the photo
     :info: = Description of the recipe
@@ -37,6 +39,13 @@ class Recipe(models.Model):
     title = models.CharField(_("Recipe Title"), max_length=250)
     slug = AutoSlugField(_('slug'), populate_from='title', unique=True)
     author = models.ForeignKey(User, on_delete=models.CASCADE, null=True)
+    # The house the recipe belongs to. Nullable only so the column could be
+    # added to existing rows; a null household is unreachable through the API
+    # by design -- it belongs to no house, so no member can see it.
+    household = models.ForeignKey(
+        Household, on_delete=models.CASCADE, related_name='recipes',
+        null=True, blank=True
+    )
     photo = models.ImageField(_('photo'), blank=True, upload_to="upload/recipe_photos")
     photo_thumbnail = ImageSpecField(source='photo',
                                      processors=[ResizeToFill(300, 200)],
@@ -57,7 +66,6 @@ class Recipe(models.Model):
     servings = models.IntegerField(_('servings'), help_text="enter total number of servings")
     pub_date = models.DateTimeField(auto_now_add=True)
     update_date = models.DateTimeField(auto_now=True)
-    public = models.BooleanField(default=True)
 
     class Meta:
         ordering = ['-pub_date', 'title']

@@ -5,6 +5,7 @@ import json
 from django.test import TestCase
 from django.contrib.auth.models import User
 from rest_framework.test import APIRequestFactory
+from v1.common.testing import one_household
 from v1.list import views
 from v1.list.models import GroceryItem
 
@@ -14,6 +15,8 @@ class ListTests(TestCase):
 
     def setUp(self):
         self.factory = APIRequestFactory()
+        # Fixture lists load with no household; scope them to one.
+        self.household = one_household()
 
     def test_list_item_count(self):
         """Test to make sure the count is right for items"""

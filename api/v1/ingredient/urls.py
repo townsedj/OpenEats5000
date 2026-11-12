@@ -8,8 +8,8 @@ from . import views
 
 # Create a router and register our viewsets with it.
 router = DefaultRouter()
-router.register(r'ingredient', views.IngredientViewSet)
-router.register(r'ingredient-group', views.IngredientGroupViewSet)
+router.register(r'ingredient', views.IngredientViewSet, basename='ingredient')
+router.register(r'ingredient-group', views.IngredientGroupViewSet, basename='ingredient-group')
 
 urlpatterns = [
     path('', include(router.urls)),

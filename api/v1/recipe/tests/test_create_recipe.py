@@ -8,6 +8,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.conf import settings
 from rest_framework.test import APIRequestFactory
 from v1.recipe import views
+from v1.common.testing import one_household
 
 
 class RecipeSerializerTests(TestCase):
@@ -22,6 +23,9 @@ class RecipeSerializerTests(TestCase):
         self.staff = User.objects.create_user(
             username='staff', email='staff@gmail.com', password='top_secret', is_superuser=True
         )
+        # Fixtures predate household scoping, so the rows they load have
+        # no household and a scoped queryset cannot see them.
+        self.household = one_household()
 
     def test_simple_create_recipe(self):
         """Test to make sure we have the right fields"""

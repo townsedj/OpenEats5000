@@ -3,8 +3,10 @@
 
 import json
 from django.test import TestCase
+from django.contrib.auth.models import User
 from rest_framework.test import APIRequestFactory
 from v1.recipe import views
+from v1.common.testing import one_household
 
 
 class RecipeSerializerTests(TestCase):
@@ -18,11 +20,16 @@ class RecipeSerializerTests(TestCase):
 
     def setUp(self):
         self.factory = APIRequestFactory()
+        self.user = User.objects.get(pk=1)
+        # Fixtures predate household scoping, so the rows they load have
+        # no household and a scoped queryset cannot see them.
+        self.household = one_household()
 
     def test_retrieve_view(self):
         """Try and read the view of a recipe"""
         view = views.RecipeViewSet.as_view({'get': 'retrieve'})
         request = self.factory.get('/api/v1/recipe/recipes/tasty-chili')
+        request.user = self.user
         response = view(request, slug='tasty-chili')
 
         self.assertTrue(response.data.get('id') == 1)
@@ -34,6 +41,7 @@ class RecipeSerializerTests(TestCase):
         """Try and read the view of a recipe"""
         view = views.RecipeViewSet.as_view({'get': 'list'})
         request = self.factory.get('/api/v1/recipe/recipes/tasty-chili?course=entry&cuisine=american')
+        request.user = self.user
         response = view(request)
 
         self.assertEqual(len(response.data.get('results')), 31)
@@ -42,12 +50,14 @@ class RecipeSerializerTests(TestCase):
         """Try and read the view of a recipe"""
         view = views.MiniBrowseViewSet.as_view({'get': 'list'})
         request = self.factory.get('/api/v1/recipe/mini-browse')
+        request.user = self.user
         response = view(request)
         self.assertEqual(len(response.data), 4)
 
         def get_mini_browse(limit):
             v = views.MiniBrowseViewSet.as_view({'get': 'list'})
             r = self.factory.get('/api/v1/recipe/mini-browse/?limit=%s' % limit)
+            r.user = self.user
             results = json.loads(json.dumps(v(r).data)).get('results')
             self.assertEqual(len(results), limit)
             for r in results:

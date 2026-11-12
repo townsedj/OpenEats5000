@@ -8,10 +8,15 @@ from . import views
 
 # Create a router and register our viewsets with it.
 router = DefaultRouter()
-router.register(r'menu-item', views.MenuItemViewSet)
+router.register(r'menu-item', views.MenuItemViewSet, basename='menu-item')
 
 urlpatterns = [
     path('', include(router.urls)),
+    path(
+        'day-nutrition/',
+        views.DayNutritionView.as_view(),
+        name='day_nutrition'
+    ),
     path(
         'menu-stats/',
         views.MenuStatsViewSet.as_view(),

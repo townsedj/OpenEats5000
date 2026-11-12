@@ -2,15 +2,24 @@
 # encoding: utf-8
 
 from django.contrib import admin
-from .models import MenuItem
+
+from .models import MenuItem, ServingLog
 
 
+class ServingLogInline(admin.TabularInline):
+    model = ServingLog
+    extra = 0
+
+
+@admin.register(MenuItem)
 class MenuItemAdmin(admin.ModelAdmin):
-    # ordering = ['title', 'recipe']
-    # list_display = ['recipe', 'title']
-    # list_filter = ['recipe__title']
-    # search_fields = ['title', 'recipe__title', ]
-    pass
+    list_display = ['__str__', 'household', 'kind', 'date', 'week_start', 'status']
+    list_filter = ['household', 'kind', 'status']
+    search_fields = ['title', 'recipe__title']
+    inlines = [ServingLogInline]
 
 
-admin.site.register(MenuItem, MenuItemAdmin)
+@admin.register(ServingLog)
+class ServingLogAdmin(admin.ModelAdmin):
+    list_display = ['user', 'menu_item', 'servings', 'date']
+    list_filter = ['user']
