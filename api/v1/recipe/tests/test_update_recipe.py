@@ -137,7 +137,6 @@ class RecipeSerializerTests(TestCase):
             "prep_time": 60,
             "cook_time": 60,
             "servings": 8,
-            "rating": 0,
             "cuisine": {"id": 1},
             "course": {"id": 2}
         }
@@ -262,7 +261,6 @@ class RecipeSerializerTests(TestCase):
             "prep_time": 60,
             "cook_time": 60,
             "servings": 8,
-            "rating": 0,
             "cuisine": {"id": 1},
             "course": {"id": 2}
         }

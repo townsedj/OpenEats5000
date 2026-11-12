@@ -2,8 +2,6 @@
 # encoding: utf-8
 
 import random
-from django.db.models import Avg, IntegerField, Value
-from django.db.models.functions import Cast, Coalesce, Floor, Greatest, Least
 
 from rest_framework import permissions, viewsets, filters
 from rest_framework.response import Response
@@ -24,7 +22,7 @@ class RecipeViewSet(viewsets.ModelViewSet):
     permission_classes = (permissions.IsAuthenticatedOrReadOnly,)
     filter_backends = (filters.SearchFilter, filters.OrderingFilter)
     search_fields = ('title', 'tags__title', 'ingredient_groups__ingredients__title')
-    ordering_fields = ('pub_date', 'title', 'rating', )
+    ordering_fields = ('pub_date', 'title', )
 
     def get_queryset(self):
         query = Recipe.objects
@@ -45,36 +43,7 @@ class RecipeViewSet(viewsets.ModelViewSet):
             )
 
         query = query.filter(**filter_set)
-        if 'rating' not in self.request.query_params:
-            return query
-
-        # Filter on the whole-number average rating in the database rather than
-        # in Python. The previous version evaluated the queryset and returned a
-        # list, which silently disabled pagination and OrderingFilter on this
-        # path and loaded every matching recipe into memory.
-        #
-        # rating_int mirrors v1.rating.average_rating.convert_rating_to_int:
-        # no ratings -> 0, otherwise truncate the average and clamp to 0..5.
-        # Truncation and flooring agree here because the clamp removes the
-        # negative range where they would differ.
-        wanted = []
-        for value in self.request.query_params.get('rating').split(','):
-            try:
-                wanted.append(int(value))
-            except ValueError:
-                # Unparseable values matched nothing before; keep that.
-                continue
-
-        return query.annotate(
-            rating_avg=Coalesce(Avg('rating__rating'), Value(0.0)),
-        ).annotate(
-            # The bounds stay floats so the expression has one type, then the
-            # whole thing is cast once for an integer comparison.
-            rating_int=Cast(
-                Least(Greatest(Floor('rating_avg'), Value(0.0)), Value(5.0)),
-                output_field=IntegerField(),
-            ),
-        ).filter(rating_int__in=wanted)
+        return query
 
     def create(self, request, *args, **kwargs):
         return Response(
