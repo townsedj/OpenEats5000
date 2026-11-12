@@ -13,7 +13,22 @@ SERVE_MEDIA = True
 PROJECT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Make this unique, and don't share it with anybody.
-SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'ChangeMe!')
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
+if not SECRET_KEY:
+    # No env var, so use a key generated on first run and kept out of git.
+    # Deliberately not a literal default: the old 'ChangeMe!' was a known
+    # 9-byte value that actually signed the auth tokens.
+    # NB: the file is NOT called secrets/ on purpose -- a `secrets` package
+    # next to manage.py would shadow the stdlib module of that name.
+    _key_file = os.path.join(PROJECT_PATH, '.secret_key')
+    try:
+        with open(_key_file) as _f:
+            SECRET_KEY = _f.read().strip()
+    except OSError:
+        from django.core.management.utils import get_random_secret_key
+        SECRET_KEY = get_random_secret_key()
+        with open(_key_file, 'w') as _f:
+            _f.write(SECRET_KEY)
 
 # Force Django to use https headers if its behind a https proxy.
 # See: https://docs.djangoproject.com/en/2.0/ref/settings/#secure-proxy-ssl-header

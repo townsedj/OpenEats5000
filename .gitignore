@@ -30,3 +30,6 @@ env_prod.list
 docker-prod.version.yml
 docker-prod.override.yml
 docker-compose.override.yml
+
+# Generated on first run, never committed
+.secret_key
