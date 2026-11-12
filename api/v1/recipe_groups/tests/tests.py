@@ -29,7 +29,7 @@ class RecipeGroupsTests(TestCase):
         totals = {"american": 31}
 
         for item in results:
-            self.assertEquals(totals[item.get('slug')], item.get('total'))
+            self.assertEqual(totals[item.get('slug')], item.get('total'))
 
     def test_course_all(self):
         view = views.CourseCountViewSet.as_view({'get': 'list'})
@@ -42,7 +42,7 @@ class RecipeGroupsTests(TestCase):
         totals = {"entry": 31}
 
         for item in results:
-            self.assertEquals(totals[item.get('slug')], item.get('total'))
+            self.assertEqual(totals[item.get('slug')], item.get('total'))
 
     def test_cuisine_with_filters(self):
         view = views.CuisineCountViewSet.as_view({'get': 'list'})
@@ -55,7 +55,7 @@ class RecipeGroupsTests(TestCase):
         totals = {"american": 31}
 
         for item in results:
-            self.assertEquals(totals[item.get('slug')], item.get('total'))
+            self.assertEqual(totals[item.get('slug')], item.get('total'))
 
     def test_cuisine_with_course_filter_no_results(self):
         view = views.CuisineCountViewSet.as_view({'get': 'list'})
@@ -82,7 +82,7 @@ class RecipeGroupsTests(TestCase):
         totals = {"entry": 31}
 
         for item in results:
-            self.assertEquals(totals[item.get('slug')], item.get('total'))
+            self.assertEqual(totals[item.get('slug')], item.get('total'))
 
     def test_course_with_cuisine_filter_no_results(self):
         view = views.CourseCountViewSet.as_view({'get': 'list'})

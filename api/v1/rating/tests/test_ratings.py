@@ -2,7 +2,6 @@
 # #!/usr/bin/env python
 # # encoding: utf-8
 #
-# import mock
 # from django.test import TestCase
 # from copy import deepcopy
 #

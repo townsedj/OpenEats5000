@@ -22,22 +22,27 @@ if os.environ.get('HTTP_X_FORWARDED_PROTO', 'False').lower() == 'true':
 
 SITE_ID = 1
 
+# SQLite is the local database: one file, no service to run, and a backup is
+# a file copy. WAL lets readers and a writer work concurrently, which is all a
+# household-sized install needs. IMMEDIATE transactions avoid the "database is
+# locked" errors SQLite's deferred default produces under concurrent writes.
 DATABASES = {
     'default': {
-        'ENGINE': os.environ.get('DATABASE_ENGINE', 'django.db.backends.mysql'),
-        'NAME': os.environ.get('MYSQL_DATABASE', 'openeats'),
-        'USER': os.environ.get('MYSQL_USER', 'root'),
-        'PASSWORD': os.environ.get('MYSQL_ROOT_PASSWORD', ''),
-        'HOST': os.environ.get('MYSQL_HOST', 'db'),
-        'PORT': os.environ.get('MYSQL_PORT', '3306'),
-        'TEST': {
-            'NAME': os.environ.get('MYSQL_TEST_DATABASE', 'test_openeats')
-        }
+        'ENGINE': os.environ.get('DATABASE_ENGINE', 'django.db.backends.sqlite3'),
+        'NAME': os.environ.get(
+            'DATABASE_NAME', os.path.join(PROJECT_PATH, 'openeats.sqlite3')
+        ),
+        'OPTIONS': {
+            'init_command': 'PRAGMA journal_mode=WAL;',
+            'transaction_mode': 'IMMEDIATE',
+        },
     }
 }
-if 'django.db.backends.mysql' in DATABASES['default']['ENGINE']:
-    DATABASES['default'].setdefault('OPTIONS', {})
-    DATABASES['default']['OPTIONS']['charset'] = 'utf8mb4'
+
+# Auto-created primary keys stay AutoField on purpose. The app's models are
+# tracked through a git subtree from upstream, and switching to BigAutoField
+# would add an AlterField migration to every app for no practical gain here.
+DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
 
 # Hosts/domain names that are valid for this site; required if DEBUG is False
 # See https://docs.djangoproject.com/en/2.0/ref/settings/#allowed-hosts
@@ -104,7 +109,6 @@ INSTALLED_APPS = (
     'django_filters',
     'rest_framework',
     'rest_framework.authtoken',
-    'coreapi',
 
     'base',
     'v1.recipe',
@@ -151,7 +155,7 @@ LANGUAGE_CODE = 'en-us'
 REST_FRAMEWORK = {
     'DEFAULT_FILTER_BACKENDS': ('django_filters.rest_framework.DjangoFilterBackend',),
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_jwt.authentication.JSONWebTokenAuthentication',
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
         'rest_framework.authentication.SessionAuthentication',
         'rest_framework.authentication.BasicAuthentication',
     ),
@@ -165,15 +169,18 @@ REST_FRAMEWORK = {
     }
 }
 
-# http://getblimp.github.io/django-rest-framework-jwt/#additional-settings
-JWT_AUTH = {
-    # We are returning custom data to our UI.
-    'JWT_RESPONSE_PAYLOAD_HANDLER': 'v1.accounts.jwt_handler.handler',
-
-    # Allow for token refresh and increase the timeout of the user token.
-    'JWT_ALLOW_REFRESH': True,
-    'JWT_EXPIRATION_DELTA': datetime.timedelta(days=14),
-    'JWT_REFRESH_EXPIRATION_DELTA': datetime.timedelta(weeks=30),
+# https://django-rest-framework-simplejwt.readthedocs.io/en/latest/settings.html
+# Lifetimes carried over from the old djangorestframework-jwt config. simplejwt
+# has no JWT_RESPONSE_PAYLOAD_HANDLER equivalent, so the custom login payload
+# is built in v1/accounts/serializers.py instead.
+SIMPLE_JWT = {
+    # Sliding tokens, not the default access/refresh pair: the front end sends
+    # Authorization: JWT <token> and refreshes by POSTing {"token": ...}, which
+    # is the sliding shape. See v1/accounts/serializers.py.
+    'AUTH_HEADER_TYPES': ('JWT', 'Bearer'),
+    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.SlidingToken',),
+    'SLIDING_TOKEN_LIFETIME': datetime.timedelta(days=14),
+    'SLIDING_TOKEN_REFRESH_LIFETIME': datetime.timedelta(weeks=30),
 }
 
 # We don't want the API to serve static in production.
@@ -183,9 +190,17 @@ if not DEBUG:
         'rest_framework.renderers.JSONRenderer',
     )
 
-CORS_ORIGIN_WHITELIST = (
-    os.environ.get('NODE_URL', 'localhost:8080')
-)
+# Must be a list of origins *including the scheme*. The old setting name was
+# CORS_ORIGIN_WHITELIST and was assigned a parenthesised string rather than a
+# tuple, so cors-headers iterated it one character at a time.
+CORS_ALLOWED_ORIGINS = ['http://localhost:8080']
+
+env_node_url = os.environ.get('NODE_URL', None)
+if env_node_url is not None:
+    if ',' in env_node_url:
+        CORS_ALLOWED_ORIGINS += [origin.strip() for origin in env_node_url.split(',')]
+    else:
+        CORS_ALLOWED_ORIGINS.append(env_node_url)
 
 # Static and i18n settings
 STATICFILES_FINDERS = (
@@ -205,10 +220,6 @@ FIXTURE_DIRS = [
 # to load the internationalization machinery.
 USE_I18N = True
 
-# If you set this to False, Django will not format dates, numbers and
-# calendars according to the current locale
-USE_L10N = True
-
 # Absolute path to the directory that holds media.
 # Example: "/home/media/media.lawrence.com/"
 MEDIA_ROOT = os.path.join(PROJECT_PATH, 'site-media')
@@ -220,10 +231,10 @@ STATIC_ROOT = os.path.join(PROJECT_PATH, 'static-files')
 MEDIA_URL = '/site-media/'
 STATIC_URL = '/static-files/'
 
-ugettext = lambda s: s
+gettext = lambda s: s
 LANGUAGES = (
-     ('en', ugettext('English')),
-     ('de', ugettext('German')),
+     ('en', gettext('English')),
+     ('de', gettext('German')),
    )
 
 try:

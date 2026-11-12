@@ -2,9 +2,12 @@
 # encoding: utf-8
 
 from django.urls import path
-from rest_framework_jwt.views import obtain_jwt_token, refresh_jwt_token
 
+from . import views
+
+# Paths are unchanged from the djangorestframework-jwt version; the front end
+# has them hard-coded in web/modules/common/config.js.
 urlpatterns = [
-    path('obtain-auth-token/', obtain_jwt_token),
-    path('refresh-auth-token/', refresh_jwt_token)
+    path('obtain-auth-token/', views.ObtainAuthToken.as_view()),
+    path('refresh-auth-token/', views.RefreshAuthToken.as_view()),
 ]

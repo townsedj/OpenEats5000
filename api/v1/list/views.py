@@ -1,9 +1,8 @@
 #!/usr/bin/env python
 # encoding: utf-8
 
-from rest_framework import filters, viewsets, status
+from rest_framework import filters, generics, viewsets, status
 from rest_framework.response import Response
-from rest_framework_bulk import ListBulkCreateUpdateDestroyAPIView
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q
 
@@ -40,7 +39,7 @@ class GroceryItemViewSet(viewsets.ModelViewSet):
     serializer_class = GroceryItemSerializer
     permission_classes = (IsItemOwner,)
     filter_backends = (filters.SearchFilter, DjangoFilterBackend)
-    filter_fields = ('list',)
+    filterset_fields = ('list',)
 
     def get_queryset(self):
         user = self.request.user
@@ -51,11 +50,20 @@ class GroceryItemViewSet(viewsets.ModelViewSet):
         return GroceryItem.objects.none()
 
 
-class BulkGroceryItemViewSet(ListBulkCreateUpdateDestroyAPIView):
+class BulkGroceryItemViewSet(generics.GenericAPIView):
     """
-    This viewset automatically provides `list`, `create`, `retrieve`,
-    `update` and `destroy` actions in bulk.
-    See: https://github.com/miki725/django-rest-framework-bulk
+    Bulk create, update and destroy for grocery items.
+
+    Request and response shapes are unchanged from the djangorestframework-bulk
+    version this replaces, because web/modules/list/ depends on them:
+
+      POST   [{list, title, completed, order}, ...]  -> 201 + created items
+      PUT    [{id, list, title, completed, order}, ...] -> 200 + updated items
+      PATCH  [{id, <changed fields>}, ...]           -> 200 + updated items
+      DELETE [id, id, ...]                           -> 204
+
+    Every method works through get_queryset(), so a caller can only touch items
+    on lists they own or that are shared with them.
     """
     serializer_class = BulkGroceryItemSerializer
     permission_classes = (IsItemOwner,)
@@ -68,13 +76,43 @@ class BulkGroceryItemViewSet(ListBulkCreateUpdateDestroyAPIView):
             )
         return GroceryItem.objects.none()
 
-    def bulk_destroy(self, request, *args, **kwargs):
-        qs = self.get_queryset()
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data, many=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-        filtered = qs.filter(id__in=self.request.data)
-        if not self.allow_bulk_destroy(qs, filtered):
-            return Response(status=status.HTTP_400_BAD_REQUEST)
+    def put(self, request, *args, **kwargs):
+        return self._bulk_update(request, partial=False)
 
-        self.perform_bulk_destroy(filtered)
+    def patch(self, request, *args, **kwargs):
+        return self._bulk_update(request, partial=True)
 
+    def _bulk_update(self, request, partial):
+        if not isinstance(request.data, list):
+            return Response(
+                {'detail': 'Expected a list of items.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        ids = [item.get('id') for item in request.data if isinstance(item, dict)]
+        instances = list(self.get_queryset().filter(id__in=ids))
+
+        serializer = self.get_serializer(
+            instances, data=request.data, many=True, partial=partial
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def delete(self, request, *args, **kwargs):
+        try:
+            ids = [int(pk) for pk in request.data]
+        except (TypeError, ValueError):
+            return Response(
+                {'detail': 'Expected a list of item ids.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        self.get_queryset().filter(id__in=ids).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

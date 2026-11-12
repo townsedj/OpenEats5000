@@ -19,7 +19,7 @@ class IngredientGroupViewSet(viewsets.ModelViewSet):
         permissions.IsAuthenticatedOrReadOnly,
         IsOwnerOrReadOnly
     )
-    filter_fields = ('recipe',)
+    filterset_fields = ('recipe',)
 
 
 class IngredientViewSet(viewsets.ModelViewSet):
@@ -33,4 +33,4 @@ class IngredientViewSet(viewsets.ModelViewSet):
         permissions.IsAuthenticatedOrReadOnly,
         IsOwnerOrReadOnly
     )
-    filter_fields = ('ingredient_group', 'ingredient_group__recipe')
+    filterset_fields = ('ingredient_group', 'ingredient_group__recipe')

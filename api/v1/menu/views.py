@@ -21,7 +21,7 @@ class MenuItemViewSet(viewsets.ModelViewSet):
     queryset = MenuItem.objects.all()
     serializer_class = MenuItemSerializer
     permission_classes = (IsMenuItemOwner,)
-    filter_fields = ('recipe', 'start_date', 'complete_date', 'complete')
+    filterset_fields = ('recipe', 'start_date', 'complete_date', 'complete')
 
     def get_queryset(self):
         user = self.request.user
