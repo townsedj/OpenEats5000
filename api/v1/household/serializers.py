@@ -91,4 +91,6 @@ class HouseholdSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Household
-        fields = ('id', 'name', 'members')
+        # The salt settings are editable: they set what a spoonful
+        # weighs, and so change every sodium figure the app reports.
+        fields = ('id', 'name', 'members', 'default_salt', 'kosher_salt')

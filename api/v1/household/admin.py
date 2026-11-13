@@ -8,7 +8,7 @@ from .models import Household, NutritionTarget, Profile
 
 @admin.register(Household)
 class HouseholdAdmin(admin.ModelAdmin):
-    list_display = ('name', 'created')
+    list_display = ('name', 'default_salt', 'kosher_salt', 'created')
     filter_horizontal = ('members',)
 
 

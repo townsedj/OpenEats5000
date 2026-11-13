@@ -36,9 +36,41 @@ class Household(models.Model):
     Everything shared hangs off this; everything personal (portions,
     nutrition targets) hangs off User instead.
     """
+    class Salt(models.TextChoices):
+        TABLE = 'table', _('table salt (fine)')
+        KOSHER_MORTON = 'kosher_morton', _('Morton kosher')
+        KOSHER_DIAMOND = 'kosher_diamond_crystal', _('Diamond Crystal kosher')
+        COARSE_SEA = 'coarse_sea', _('coarse sea salt')
+        FLAKE = 'flake_maldon', _('flaky sea salt')
+
+    class KosherSalt(models.TextChoices):
+        MORTON = 'kosher_morton', _('Morton kosher')
+        DIAMOND = 'kosher_diamond_crystal', _('Diamond Crystal kosher')
+
     name = models.CharField(_('name'), max_length=150)
     members = models.ManyToManyField(
         User, verbose_name=_('members'), related_name='households', blank=True
+    )
+
+    # Salt needs two settings, not one, because a kitchen usually has two
+    # boxes and the recipe's wording decides which one gets reached for.
+    #
+    # Why any of this is stored at all: every salt is essentially pure
+    # sodium chloride, so the sodium per gram is identical, but a teaspoon
+    # of Diamond Crystal weighs 2.8g against table salt's 6.0g. A recipe
+    # measured in spoons therefore carries up to twice the sodium depending
+    # on which box it is, and FoodData Central has no kosher salt entry at
+    # all to read it from.
+    default_salt = models.CharField(
+        _('default salt'), max_length=30, choices=Salt.choices, blank=True,
+        default=Salt.TABLE,
+        help_text='what a recipe means when it just says "salt"'
+    )
+    kosher_salt = models.CharField(
+        _('kosher salt'), max_length=30, choices=KosherSalt.choices, blank=True,
+        default=KosherSalt.MORTON,
+        help_text='which box a recipe calling for kosher salt gets; the two '
+                  'brands are 70% apart by volume'
     )
     created = models.DateTimeField(auto_now_add=True)
 
