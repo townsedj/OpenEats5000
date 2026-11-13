@@ -23,6 +23,7 @@ be physically plausible, or it is dropped.
 """
 
 import json
+import math
 import re
 
 from django.conf import settings
@@ -40,6 +41,28 @@ CANDIDATES_PER_LINE = 12
 # word like "salt" appears in hundreds of descriptions, so some cap is
 # needed; what matters is that the cap keeps the shortest ones.
 WORD_MATCH_LIMIT = 300
+
+# Categories FoodData Central publishes that a recipe line almost never
+# means. "orange juice" retrieved seven baby foods before this existed, and
+# "shrimp" retrieved four chain restaurants; both crowded the real food out
+# of a twelve-slot list.
+#
+# A tiebreak, not a filter. These are real foods and somebody might eat one,
+# but a line that means one says so -- it names the brand or the restaurant,
+# and those words are rare enough to win on their own merit.
+DEMOTED_CATEGORIES = frozenset({
+    'Baby Foods',
+    'Fast Foods',
+    'Restaurant Foods',
+    'Meals, Entrees, and Side Dishes',
+    'American Indian/Alaska Native Foods',
+    'Snacks',
+})
+
+# How many foods each half of a split compound has to appear in before the
+# split is believed. Two is noise: a three-letter fragment matches something
+# by accident in a table this size.
+MIN_SPLIT_MATCHES = 3
 
 # A single ingredient line heavier than this is a parsing failure, not a
 # recipe. Twenty kilos would be a catering order.
@@ -140,14 +163,89 @@ def normalise_unit(measurement):
     return UNIT_ALIASES.get(unit, unit)
 
 
+def foods_containing(word, limit=WORD_MATCH_LIMIT):
+    """
+    Foods whose description contains `word`, and how many there are in all.
+
+    Shortest description first, which is what makes the cap meaningful. It
+    used to inherit Meta.ordering and keep the alphabetically first rows:
+    660 foods contain "salt" and "Salt, table" is 496th alphabetically, so
+    a search for "kosher salt" could not see it at all, while "Amaranth
+    leaves, cooked, boiled, drained, with salt" was kept.
+
+    The count is returned because rarity is the whole basis of scoring
+    below, and it is free whenever the cap was not reached.
+    """
+    found = list(
+        Food.objects.filter(description__icontains=word)
+        .only('id', 'fdc_id', 'description', 'data_type', 'category')
+        .order_by(Length('description'))[:limit]
+    )
+    if len(found) < limit:
+        return found, len(found)
+    return found, Food.objects.filter(description__icontains=word).count()
+
+
+def split_compound(word):
+    """
+    Two words that `word` is a run-together spelling of, if it is one.
+
+    Recipes write "breadcrumbs"; USDA writes "Bread crumbs, dry, grated".
+    One word against two means zero rows retrieved, and a line with no
+    candidates is never even asked about -- it just silently carries no
+    nutrition.
+
+    Both halves have to be words the food table knows, which is what keeps
+    this from inventing splits: "bre"/"adcrumbs" is rejected because
+    nothing contains "adcrumbs", and so the search moves on to
+    "bread"/"crumbs", which both exist.
+    """
+    for cut in range(3, len(word) - 2):
+        left, right = word[:cut], word[cut:]
+        left_count = Food.objects.filter(description__icontains=left).count()
+        if left_count < MIN_SPLIT_MATCHES:
+            continue
+        right_count = Food.objects.filter(description__icontains=right).count()
+        if right_count >= MIN_SPLIT_MATCHES:
+            return [left, right]
+    return []
+
+
+def head_noun_matched(description, matched):
+    """
+    Whether the food's own name, not a qualifier, is what matched.
+
+    USDA descriptions are "FOOD, qualifier, qualifier": everything before
+    the first comma is the food itself. So "Rice, white, long-grain" is rice
+    and "Rice crackers" is a cracker, which is the difference between the
+    answer to "jasmine rice" and a snack that happens to share a word.
+    """
+    head = WORD.findall(normalise(description.split(',')[0]))
+    return bool(head) and all(word in matched for word in head)
+
+
 def candidates_for(title, limit=CANDIDATES_PER_LINE):
     """
     Foods worth considering for one ingredient line.
 
-    Scored by how many of the line's words appear in the description, then
-    by brevity -- "Onions, raw" should beat "Onion rings, breaded, par
-    fried, frozen, prepared, heated in oven", which contains the same word
-    plus six qualifiers nobody asked for.
+    Ranked on four signals, in order:
+
+    1. **How many of the line's words the description contains.** A food
+       matching every word beats one matching some, always.
+    2. **How rare those words are.** This is what rescues a line whose words
+       never co-occur. Nothing in the table says both "ground" and
+       "sirloin", so every candidate scored 1 and brevity decided -- which
+       filled all twelve slots with "Emu, ground, raw", "Lamb, ground, raw",
+       "Ostrich, ground, raw" and not one beef. "sirloin" appears in sixty
+       descriptions and "ground" in several hundred, so the rare word is the
+       one carrying the meaning, and a food matching it ranks above a short
+       food matching the common one.
+    3. **Whether the match is the food's own name** rather than a qualifier.
+    4. **Brevity**, as the last word: "Onions, raw" over "Onion rings,
+       breaded, par fried, frozen, prepared, heated in oven".
+
+    Signals 2-4 only ever reorder candidates that signal 1 ties, so a line
+    whose words all appear in one description is unaffected by any of them.
     """
     words = tokens(title)
     if not words:
@@ -156,33 +254,123 @@ def candidates_for(title, limit=CANDIDATES_PER_LINE):
     # One query per word, then score in Python. The food table is small
     # enough (8k rows) that this stays fast, and it avoids depending on an
     # FTS extension being compiled in.
-    #
-    # Shortest description first, which is what makes the per-word cap
-    # meaningful. It used to inherit Meta.ordering and keep the
-    # alphabetically first 200 rows: 660 foods contain "salt" and
-    # "Salt, table" is 496th alphabetically, so a search for "kosher salt"
-    # could not see it at all, while "Amaranth leaves, cooked, boiled,
-    # drained, with salt" was kept. Length is a decent proxy for "this is
-    # the food itself rather than a dish containing it".
+    total = Food.objects.count() or 1
+
     hits = {}
+    retrieved = set()
     for word in words:
-        matches = (
-            Food.objects.filter(description__icontains=word)
-            .only('id', 'fdc_id', 'description', 'data_type')
-            .order_by(Length('description'))[:WORD_MATCH_LIMIT]
-        )
-        for food in matches:
-            entry = hits.setdefault(food.id, [food, 0])
-            entry[1] += 1
+        found, frequency = foods_containing(word)
+        if not found:
+            # Nothing at all: the word may be two words run together.
+            for part in split_compound(word):
+                found, frequency = foods_containing(part)
+                if found:
+                    retrieved.add(part)
+                    _record(hits, found, part, _rarity(total, frequency))
+            continue
+        retrieved.add(word)
+        _record(hits, found, word, _rarity(total, frequency))
 
     if not hits:
         return []
 
     ranked = sorted(
         hits.values(),
-        key=lambda entry: (-entry[1], len(entry[0].description)),
+        key=lambda entry: (
+            -len(entry['matched']),
+            -entry['rarity'],
+            not head_noun_matched(entry['food'].description, entry['matched']),
+            entry['food'].category in DEMOTED_CATEGORIES,
+            # Of two rows with the same description, the SR Legacy one.
+            # Ninety foods are published in both sets, and in every one of
+            # them SR Legacy carries the fuller record: 29 nutrients against
+            # Foundation's 13 to 23, and usually more portions. Worth
+            # re-measuring if a later release changes that.
+            entry['food'].data_type != Food.DataType.SR_LEGACY,
+            len(entry['food'].description),
+        ),
     )
-    return [food for food, _score in ranked[:limit]]
+    ranked = _without_duplicates(ranked)
+
+    if len(ranked[0]['matched']) < len(retrieved):
+        # No food contains all the words, so every candidate is a partial
+        # reading of the line and rarity alone decides the order. That is
+        # how "kosher salt" filled twelve slots with kosher dill pickles --
+        # "kosher" is rarer than "salt", and no description holds both, so
+        # the one food the line actually meant was ranked thirteenth.
+        ranked = _interleave(ranked, limit)
+
+    return [entry['food'] for entry in ranked[:limit]]
+
+
+def _without_duplicates(ranked):
+    """
+    One row per description, keeping the better-ranked of a pair.
+
+    Ninety descriptions exist twice because SR Legacy and Foundation both
+    publish them. Offering the model the same words twice spends two of
+    twelve slots on one answer, and asks it to choose between two options
+    that read identically.
+    """
+    seen = set()
+    kept = []
+    for entry in ranked:
+        description = normalise(entry['food'].description)
+        if description in seen:
+            continue
+        seen.add(description)
+        kept.append(entry)
+    return kept
+
+
+def _interleave(ranked, limit):
+    """
+    Take the best of each reading in turn, rather than all of one reading.
+
+    Which word matters most is not knowable here -- "kosher salt" is salt
+    and "kosher dill" is a pickle -- so the list offers the model the best
+    few of each and lets it decide from the whole line.
+    """
+    readings = {}
+    for entry in ranked:
+        readings.setdefault(frozenset(entry['matched']), []).append(entry)
+
+    # dict preserves insertion order, so the readings are already in
+    # best-first order and so is each list within them.
+    queues = list(readings.values())
+    chosen = []
+    while len(chosen) < limit:
+        before = len(chosen)
+        for queue in queues:
+            if queue:
+                chosen.append(queue.pop(0))
+                if len(chosen) >= limit:
+                    return chosen
+        if len(chosen) == before:
+            break
+    return chosen
+
+
+def _rarity(total, frequency):
+    """
+    How much it means that a description contains this word.
+
+    Inverse document frequency: a word in 60 of 8,000 foods identifies one,
+    a word in 4,000 barely narrows anything, and a word in all of them --
+    which is what a stopword would be if one slipped through -- is worth
+    nothing at all.
+    """
+    return math.log(total / float(frequency or total))
+
+
+def _record(hits, found, word, rarity):
+    for food in found:
+        entry = hits.setdefault(
+            food.id, {'food': food, 'rarity': 0.0, 'matched': set()}
+        )
+        if word not in entry['matched']:
+            entry['matched'].add(word)
+            entry['rarity'] += rarity
 
 
 def remember_unit_weight(food, quantity, measurement, grams):
@@ -594,6 +782,12 @@ def match_recipe(recipe, client=None, model=None, force=False, use_cache=True):
 
     Returns a summary dict. Makes at most one API call, and none at all when
     the cache already answers every line.
+
+    `force` reaches past the cache as well as past the already-matched
+    rows, because the cache is keyed by the ingredient's text and would
+    otherwise hand back the very answer being rejected. Without that, force
+    could only ever replace a hand correction with the cached guess -- the
+    opposite of what asking for it means. So it costs a call.
     """
     rows = lines_to_match(recipe, force=force)
     summary = {
@@ -609,7 +803,7 @@ def match_recipe(recipe, client=None, model=None, force=False, use_cache=True):
         return summary
 
     cached = {}
-    if use_cache:
+    if use_cache and not force:
         texts = {normalise(row.title) for row in rows}
         cached = {
             entry.text: entry

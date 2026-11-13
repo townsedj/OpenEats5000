@@ -35,7 +35,8 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             '--force', action='store_true',
-            help='Redo lines already matched, including ones set by hand',
+            help='Ask again about lines already matched, including ones set '
+                 'by hand. Reaches past the cache, so it always costs a call.',
         )
 
     def handle(self, *args, **options):

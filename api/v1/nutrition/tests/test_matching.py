@@ -71,10 +71,11 @@ class StubClient(object):
         return StubResponse(self.rounds[index])
 
 
-def make_food(fdc_id, description, portions=(), **amounts):
+def make_food(fdc_id, description, portions=(), category='',
+              data_type=Food.DataType.SR_LEGACY, **amounts):
     food = Food.objects.create(
         fdc_id=fdc_id, description=description,
-        data_type=Food.DataType.SR_LEGACY,
+        data_type=data_type, category=category,
     )
     for key, amount in amounts.items():
         FoodNutrient.objects.create(food=food, nutrient=key, amount=amount)
@@ -152,6 +153,150 @@ class RetrievalTests(TestCase):
             len(matching.candidates_for('onion')),
             matching.CANDIDATES_PER_LINE,
         )
+
+
+class RankingTests(TestCase):
+    """
+    What gets into the twelve slots when no food contains every word.
+
+    All of these were found by running a week of ordinary shopping through
+    retrieval and reading the lists: the model can only pick from what it is
+    offered, so a right answer ranked thirteenth is a wrong answer.
+    """
+
+    def test_a_rare_word_outranks_a_common_one(self):
+        """
+        Nothing in FoodData Central says both "ground" and "sirloin", so
+        every candidate matched one word and brevity decided -- which filled
+        all twelve slots with emu, ostrich, lamb and flaxseed, and offered
+        not one beef. "sirloin" is the word carrying the meaning.
+        """
+        sirloin = make_food(1, 'Beef, top sirloin steak, raw', kcal=201)
+        for index, animal in enumerate(
+            ('Emu', 'Lamb', 'Veal', 'Pork', 'Bison', 'Turkey', 'Ostrich')
+        ):
+            make_food(10 + index, '%s, ground, raw' % animal, kcal=200)
+
+        found = matching.candidates_for('ground sirloin')
+
+        self.assertEqual(found[0], sirloin)
+
+    def test_a_food_matching_every_word_still_wins(self):
+        """
+        Rarity is only a tiebreak. A description containing the whole line
+        beats one containing the rare half of it, however rare that half is.
+        """
+        broth = make_food(1, 'Soup, chicken broth, canned', kcal=5)
+        make_food(2, 'Fish broth', kcal=5)
+        for index in range(8):
+            make_food(10 + index, 'Chicken, cut %s, raw' % index, kcal=190)
+
+        self.assertEqual(matching.candidates_for('chicken broth')[0], broth)
+
+    def test_each_reading_of_the_line_keeps_some_slots(self):
+        """
+        "kosher salt" is the case that made this necessary. "kosher" is the
+        rarer word, nothing contains both, and there are more than twelve
+        kosher foods -- so ranking by rarity alone offered twelve pickles and
+        pushed the one food the line meant out of the list entirely.
+        """
+        table = make_food(1, 'Salt, table', sodium_mg=38758)
+        for index in range(13):
+            make_food(10 + index, 'Pickles, kosher dill, variety %s' % index)
+        for index in range(16):
+            make_food(40 + index, 'Vegetable %s, cooked, with salt' % index)
+
+        found = matching.candidates_for('kosher salt')
+
+        self.assertIn(table, found)
+
+    def test_the_food_itself_outranks_a_dish_that_shares_its_name(self):
+        """
+        USDA writes "FOOD, qualifier, qualifier", so what sits before the
+        first comma is the food and the rest is detail. "Rice crackers" is a
+        cracker; "Rice, white, long-grain" is rice, and is what "jasmine
+        rice" means even though it is the longer description.
+        """
+        rice = make_food(1, 'Rice, white, long grain, raw', kcal=365)
+        make_food(2, 'Rice crackers', kcal=416)
+        make_food(3, 'Rice bran, crude', kcal=316)
+
+        self.assertEqual(matching.candidates_for('jasmine rice')[0], rice)
+
+    def test_baby_food_is_demoted(self):
+        """
+        "orange juice" offered seven baby foods out of twelve. They are real
+        foods, so this is a tiebreak and not a filter: a line that means one
+        says "babyfood", and then it matches on its own merit.
+        """
+        juice = make_food(
+            1, 'Beverages, orange juice, canned', kcal=45,
+            category='Fruits and Fruit Juices',
+        )
+        baby = make_food(
+            2, 'Babyfood, juice, orange', kcal=45, category='Baby Foods',
+        )
+
+        found = matching.candidates_for('orange juice')
+
+        self.assertEqual(found[0], juice)
+        self.assertIn(baby, found)
+
+    def test_a_line_that_names_a_demoted_food_still_finds_it(self):
+        make_food(1, 'Beverages, orange juice, canned', kcal=45)
+        baby = make_food(
+            2, 'Babyfood, juice, orange', kcal=45, category='Baby Foods',
+        )
+
+        self.assertEqual(
+            matching.candidates_for('babyfood orange juice')[0], baby
+        )
+
+    def test_the_fuller_of_two_identical_rows_is_offered_once(self):
+        """
+        Ninety descriptions are published by both SR Legacy and Foundation.
+        Offering both spends two slots on one answer and asks the model to
+        choose between two options that read the same. SR Legacy is kept
+        because it carries the fuller record -- 29 nutrients against 13 to
+        23, and usually more portions.
+        """
+        legacy = make_food(
+            174030, 'Beef, ground, 90% lean meat / 10% fat, raw', kcal=176,
+            data_type=Food.DataType.SR_LEGACY,
+        )
+        make_food(
+            2514743, 'Beef, ground, 90% lean meat / 10% fat, raw', kcal=176,
+            data_type=Food.DataType.FOUNDATION,
+        )
+
+        found = matching.candidates_for('ground beef')
+
+        self.assertEqual(found, [legacy])
+
+    def test_a_run_together_word_is_split(self):
+        """
+        Recipes write "breadcrumbs"; USDA writes "Bread crumbs, dry,
+        grated". One word against two retrieved nothing, and a line with no
+        candidates is never asked about -- it silently carries no nutrition.
+        """
+        crumbs = make_food(1, 'Bread, crumbs, dry, grated, plain', kcal=395)
+        make_food(2, 'Bread, white, commercially prepared', kcal=270)
+        make_food(3, 'Bread, rye', kcal=259)
+        make_food(4, 'Cookie crumbs, chocolate', kcal=480)
+        make_food(5, 'Pie crust crumbs, graham cracker', kcal=484)
+
+        self.assertIn(crumbs, matching.candidates_for('breadcrumbs'))
+
+    def test_a_split_is_not_invented(self):
+        """
+        Both halves have to be words the food table knows, or the word is
+        left alone. Otherwise every unmatched word would be chopped up until
+        some fragment hit something.
+        """
+        make_food(1, 'Bread, rye', kcal=259)
+
+        self.assertEqual(matching.split_compound('unobtainium'), [])
+        self.assertEqual(matching.candidates_for('unobtainium'), [])
 
 
 class GramResolutionTests(TestCase):
@@ -376,6 +521,27 @@ class MatchRecipeTests(TestCase):
         self.assertEqual(summary['considered'], 0)
         self.assertEqual(client.calls, [])
 
+    def test_force_asks_again_even_when_the_cache_has_an_answer(self):
+        """
+        The cache is keyed by the ingredient's text, so without this, force
+        hands back the very answer being rejected -- and its only effect is
+        to overwrite a hand correction with that answer. Asking to redo a
+        line has to mean asking again.
+        """
+        IngredientMatch.objects.create(
+            text='ground sirloin', food=self.onion, confidence='high',
+        )
+        row = self.line('ground sirloin', 1, 1, 'lb')
+
+        client = StubClient([StubMatch(0, fdc_id=1, grams=453.6)])
+        summary = matching.match_recipe(self.recipe, client=client, force=True)
+
+        row.refresh_from_db()
+        self.assertEqual(row.food, self.beef)
+        self.assertEqual(summary['from_cache'], 0)
+        self.assertEqual(summary['from_model'], 1)
+        self.assertTrue(client.calls)
+
     def test_force_redoes_a_hand_corrected_line(self):
         row = self.line('ground sirloin', 1, 1, 'lb')
         row.match_source = Ingredient.MatchSource.MANUAL
@@ -445,8 +611,10 @@ class MatchRecipeTests(TestCase):
         entry = IngredientMatch.objects.get()
         self.assertIsNone(entry.food)
 
+        # No force here: the row has no food, so it is reconsidered anyway,
+        # and the remembered "nothing fits" is what should answer it.
         again = StubClient([])
-        summary = matching.match_recipe(self.recipe, client=again, force=True)
+        summary = matching.match_recipe(self.recipe, client=again)
 
         self.assertEqual(summary['from_cache'], 1)
         self.assertEqual(again.calls, [])

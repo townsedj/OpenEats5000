@@ -90,9 +90,10 @@ class RecipeViewSet(viewsets.ModelViewSet):
         there -- which lines came from the cache, which needed the model,
         and where each weight came from.
 
-        `force=true` redoes lines already matched, including ones corrected
-        by hand. It is off by default because a hand correction is the most
-        reliable thing in the table.
+        `force=true` asks again about lines already matched, including ones
+        corrected by hand, and reaches past the cache to do it -- so it
+        always costs a call. Off by default, because a hand correction is
+        the most reliable thing in the table.
         """
         recipe = self.get_object()
         force = str(request.data.get('force', '')).lower() in ('1', 'true', 'yes')
