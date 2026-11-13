@@ -3,12 +3,14 @@
 
 import random
 
-from rest_framework import viewsets, filters
+from rest_framework import status, viewsets, filters
+from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from v1.common.permissions import IsHouseholdMember
 from v1.household.models import Household
+from v1.nutrition import compute, matching
 from . import serializers
 from .models import Recipe
 from .save_recipe import SaveRecipe
@@ -76,6 +78,39 @@ class RecipeViewSet(viewsets.ModelViewSet):
                 context=self.get_serializer_context(),
             ).data
         )
+
+
+    @action(detail=True, methods=['post'], url_path='match-ingredients')
+    def match_ingredients(self, request, slug=None):
+        """
+        POST recipe/recipes/{slug}/match-ingredients/
+
+        Resolves each ingredient line to a USDA food and a gram weight, then
+        returns the recipe's nutrition alongside a summary of how it got
+        there -- which lines came from the cache, which needed the model,
+        and where each weight came from.
+
+        `force=true` redoes lines already matched, including ones corrected
+        by hand. It is off by default because a hand correction is the most
+        reliable thing in the table.
+        """
+        recipe = self.get_object()
+        force = str(request.data.get('force', '')).lower() in ('1', 'true', 'yes')
+
+        try:
+            summary = matching.match_recipe(recipe, force=force)
+        except RuntimeError as error:
+            # No API key configured. A 503 rather than a 500: the app is
+            # working, this one capability is not switched on.
+            return Response(
+                {'detail': str(error)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response({
+            'summary': summary,
+            'nutrition': compute.recipe_nutrition(recipe),
+        })
 
 
 class MiniBrowseViewSet(viewsets.mixins.ListModelMixin,

@@ -75,6 +75,42 @@ class FoodNutrient(models.Model):
         return '%s: %s %s' % (self.nutrient, self.amount, self.unit)
 
 
+class IngredientMatch(models.Model):
+    """
+    What an ingredient line was decided to mean, cached by its text.
+
+    Two reasons this exists. It keeps the same question from being asked
+    twice -- "white onion" means the same food in every recipe that ever
+    lists it -- and it makes matching free and instant the second time,
+    which matters because the alternative is an API call per recipe save.
+
+    `food` is nullable on purpose: "nothing in the database fits this" is an
+    answer worth remembering too, otherwise every save re-asks about the
+    same unmatchable line.
+
+    Not scoped to a household. This is a dictionary of what words mean, not
+    anybody's data.
+    """
+    text = models.CharField(_('ingredient text'), max_length=250, unique=True)
+    food = models.ForeignKey(
+        Food, on_delete=models.CASCADE, related_name='matches',
+        null=True, blank=True
+    )
+    confidence = models.CharField(_('confidence'), max_length=10, blank=True)
+    model = models.CharField(
+        _('model'), max_length=60, blank=True,
+        help_text='which model decided, so a later one can redo the weak ones'
+    )
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['text']
+        verbose_name_plural = 'ingredient matches'
+
+    def __str__(self):
+        return '%s -> %s' % (self.text, self.food or 'no match')
+
+
 class FoodPortion(models.Model):
     """
     A household measure for a food, and what it weighs.
@@ -87,15 +123,32 @@ class FoodPortion(models.Model):
     :measure_unit: = "cup"
     :modifier: = "chopped" -- which matters, because a cup of chopped onion
                  and a cup of sliced onion are different weights.
+    :source: = where the weight came from. USDA publishes no weight for "1
+               whole onion" or "1 can of beans", but the assistant can
+               judge one, and that judgement is reusable knowledge about
+               the food rather than a fact about one recipe. Recording it
+               here turns the next occurrence into arithmetic -- and keeps
+               it distinguishable from measured data, so an inferred weight
+               can always be found, audited or deleted.
     """
+
+    class Source(models.TextChoices):
+        USDA = 'usda', _('published by USDA')
+        INFERRED = 'inferred', _('inferred by the assistant')
+
     food = models.ForeignKey(Food, on_delete=models.CASCADE, related_name='portions')
     amount = models.FloatField(_('amount'), default=1)
     measure_unit = models.CharField(_('measure unit'), max_length=80, blank=True)
     modifier = models.CharField(_('modifier'), max_length=200, blank=True)
     gram_weight = models.FloatField(_('gram weight'))
+    source = models.CharField(
+        _('source'), max_length=10, choices=Source.choices, default=Source.USDA
+    )
 
     class Meta:
-        ordering = ['food_id', 'id']
+        # Measured weights before inferred ones, so a USDA portion is always
+        # preferred where both exist.
+        ordering = ['food_id', 'source', 'id']
 
     def __str__(self):
         return '%s %s %s = %sg' % (
