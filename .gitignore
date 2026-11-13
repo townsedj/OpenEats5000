@@ -31,8 +31,15 @@ docker-prod.version.yml
 docker-prod.override.yml
 docker-compose.override.yml
 
-# Generated on first run, never committed
+# Secrets, read by base/settings.py. This repository is public, so these
+# lines are the only thing between a key and a scraper.
 .secret_key
+.anthropic_key
+
+# base/settings.py ends with `from local_settings import *`, so this is
+# where a local secret would naturally go. It was not ignored, which
+# made it a direct route for an API key into a public repository.
+local_settings.py
 
 # USDA FoodData Central exports. Re-downloadable from
 # fdc.nal.usda.gov/download-datasets and ~90MB unzipped, so the database

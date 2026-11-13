@@ -12,23 +12,70 @@ SERVE_MEDIA = True
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 PROJECT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Make this unique, and don't share it with anybody.
-SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
-if not SECRET_KEY:
-    # No env var, so use a key generated on first run and kept out of git.
-    # Deliberately not a literal default: the old 'ChangeMe!' was a known
-    # 9-byte value that actually signed the auth tokens.
-    # NB: the file is NOT called secrets/ on purpose -- a `secrets` package
-    # next to manage.py would shadow the stdlib module of that name.
-    _key_file = os.path.join(PROJECT_PATH, '.secret_key')
+# --------------------------------------------------------------- secrets
+#
+# One mechanism for every secret: an environment variable if it is set,
+# otherwise a single-line file beside manage.py that git ignores.
+#
+# The environment comes first on purpose. This repository is public, so a
+# secret inside the working tree is protected by nothing but a .gitignore
+# line -- one `git add -f`, one careless `-A` from another tool, and it is
+# in a public commit, where it will be scraped within minutes and is
+# painful to purge from history. The file exists for the case where setting
+# a variable is impractical, such as a service started by something else;
+# it is the fallback, not the recommendation.
+#
+# NB: these are files, not a `secrets/` package. A package of that name
+# beside manage.py would shadow the standard library's `secrets` module --
+# which is what get_random_secret_key() below imports to do its job.
+
+
+def _secret(name, filename, generate=None):
+    """
+    A secret from the environment, else from a gitignored file.
+
+    `generate` is for secrets this app is entitled to invent, which is only
+    ever a random value: an API key cannot be generated, so that one has no
+    fallback beyond the file and simply comes back empty when absent.
+    """
+    value = os.environ.get(name)
+    if value:
+        return value.strip()
+
+    path = os.path.join(PROJECT_PATH, filename)
     try:
-        with open(_key_file) as _f:
-            SECRET_KEY = _f.read().strip()
+        # utf-8-sig, not the platform default: PowerShell's Set-Content
+        # writes a UTF-8 BOM on some versions, and read as cp1252 that
+        # becomes three visible characters glued to the front of the key.
+        # strip() does not remove them, so the result is an authentication
+        # failure with a key that looks correct in every editor.
+        with open(path, encoding='utf-8-sig') as handle:
+            value = handle.read().strip()
+            if value:
+                return value
     except OSError:
-        from django.core.management.utils import get_random_secret_key
-        SECRET_KEY = get_random_secret_key()
-        with open(_key_file, 'w') as _f:
-            _f.write(SECRET_KEY)
+        pass
+
+    if generate is None:
+        return None
+
+    value = generate()
+    with open(path, 'w') as handle:
+        handle.write(value)
+    return value
+
+
+def _new_django_key():
+    from django.core.management.utils import get_random_secret_key
+    return get_random_secret_key()
+
+
+# Signs sessions, CSRF and -- because auth is simplejwt sliding tokens --
+# the login tokens themselves. Generated on first run rather than defaulting
+# to a literal: upstream shipped 'ChangeMe!', a known nine-byte value that
+# actually signed the auth tokens, so anyone who had read the OpenEats
+# source could forge a login.
+SECRET_KEY = _secret('DJANGO_SECRET_KEY', '.secret_key', generate=_new_django_key)
 
 # Force Django to use https headers if its behind a https proxy.
 # See: https://docs.djangoproject.com/en/2.0/ref/settings/#secure-proxy-ssl-header
@@ -245,6 +292,89 @@ STATIC_ROOT = os.path.join(PROJECT_PATH, 'static-files')
 # Examples: "http://media.lawrence.com", "http://example.com/media/"
 MEDIA_URL = '/site-media/'
 STATIC_URL = '/static-files/'
+
+# The assistant. The key is read from the environment and stays here: it is
+# never serialised into a response, never written to the repo, and never
+# reaches the browser, which is why every assistant feature goes through the
+# API rather than calling Anthropic from the front end.
+#
+#   $env:OPENEATS_AI_KEY = sk-or-v1-...   (PowerShell, this shell only)
+#   api/.anthropic_key                     (one line, survives a restart)
+#
+# Same mechanism as SECRET_KEY above: the environment first, else
+# api/.anthropic_key, which git ignores. No generated fallback, because an
+# API key cannot be invented -- when it is absent the assistant endpoints
+# return 503 and the rest of the app is unaffected.
+#
+# Whichever provider's key this is, give it a hard spend limit. That is the
+# one protection a leaked API key has and the Django key above does not: it
+# can be revoked and capped, so a mistake costs a few dollars rather than
+# the balance.
+ANTHROPIC_API_KEY = _secret('OPENEATS_AI_KEY', '.anthropic_key')
+
+# Which route the assistant takes. One setting rather than two, because the
+# endpoint and the model ids have to change together -- OpenRouter rejects
+# "claude-haiku-5-5" and Anthropic rejects "anthropic/claude-haiku-5.5", so
+# two independent variables are mostly a way to get a confusing 404.
+#
+# Committed as a default so the app works after a restart with nothing
+# exported. These are not secrets; only the key is, and that lives in
+# api/.anthropic_key.
+#
+# OpenRouter exposes an Anthropic-compatible /v1/messages -- an unauthorised
+# POST there answers in Anthropic's own error envelope rather than
+# OpenRouter's OpenAI-shaped one -- so the official SDK is pointed at it and
+# nothing else in the code changes. Same model and the same $0.10/$0.50 per
+# MTok as going direct, so the choice is about whose credits are spent.
+# The env names are OPENEATS_-prefixed on purpose. ANTHROPIC_* is a shared
+# namespace: the SDK reads it, and so does Claude Code, which exports
+# ANTHROPIC_BASE_URL=https://api.anthropic.com into every command it runs.
+# Reading those names meant an unrelated tool's environment silently
+# redirected this app to a provider its key was not for, which looked
+# exactly like a bad key. This app's configuration answers to this app.
+ANTHROPIC_PROVIDER = (
+    os.environ.get('OPENEATS_AI_PROVIDER') or 'openrouter'
+).lower()
+
+ANTHROPIC_ROUTES = {
+    'anthropic': {
+        'base_url': None,
+        # Haiku for the high-volume, mechanical work: matching an ingredient
+        # line to a USDA food, importing a recipe, estimating a takeaway.
+        'match_model': 'claude-haiku-5-5',
+        # Week planning is a harder judgement: two sets of targets, one set
+        # of meals.
+        'plan_model': 'claude-sonnet-5-5',
+    },
+    'openrouter': {
+        'base_url': 'https://openrouter.ai/api',
+        'match_model': 'anthropic/claude-haiku-5.5',
+        'plan_model': 'anthropic/claude-sonnet-5.5',
+    },
+}
+
+if ANTHROPIC_PROVIDER not in ANTHROPIC_ROUTES:
+    # Loudly, rather than quietly falling back to a route the key is not
+    # for: a typo would otherwise look like an authentication problem.
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured(
+        'ANTHROPIC_PROVIDER=%r is not one of %s'
+        % (ANTHROPIC_PROVIDER, ', '.join(sorted(ANTHROPIC_ROUTES)))
+    )
+
+_route = ANTHROPIC_ROUTES[ANTHROPIC_PROVIDER]
+
+# Each still overridable on its own, for trying a different model without
+# editing anything.
+ANTHROPIC_BASE_URL = (
+    os.environ.get('OPENEATS_AI_BASE_URL') or _route['base_url']
+)
+ANTHROPIC_MATCH_MODEL = (
+    os.environ.get('OPENEATS_AI_MATCH_MODEL') or _route['match_model']
+)
+ANTHROPIC_PLAN_MODEL = (
+    os.environ.get('OPENEATS_AI_PLAN_MODEL') or _route['plan_model']
+)
 
 gettext = lambda s: s
 LANGUAGES = (
